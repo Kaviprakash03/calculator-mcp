@@ -38,12 +38,16 @@ BASE_URL             = os.getenv("BASE_URL", "http://localhost:8000")
 REDIRECT_URI         = f"{BASE_URL}/oauth/callback"
 
 # ─────────────────────────────────────────────
-# In-memory stores
+# In-memory stores with persistence hints
 # ─────────────────────────────────────────────
+# Note: In production, use Redis or a database for persistence across restarts
 sessions: dict = {}          # session_id -> { access_token, email, created_at }
 pending_states: dict = {}    # google_state -> { client_redirect_uri, client_state, created_at }
 auth_codes: dict = {}        # auth_code -> { session_id, created_at }
 mcp_tokens: dict = {}        # mcp_token -> session_id
+
+# Add startup logging
+logger.info("Initializing in-memory stores")
 
 # Dynamic client registry — pre-seed VS Code known redirect URIs
 registered_clients: dict = {
@@ -212,10 +216,26 @@ async def oauth_callback(request: Request):
     if error:
         return HTMLResponse(f"<h2>Sign-in cancelled: {error}</h2>", status_code=400)
 
-    if not code or state not in pending_states:
-        return HTMLResponse("<h2>Invalid or expired request. Please try again.</h2>", status_code=400)
+    # Debug logging
+    logger.info(f"OAuth callback - state: {state}, pending_states keys: {list(pending_states.keys())}")
+    
+    if not code:
+        return HTMLResponse("<h2>No authorization code received. Please try again.</h2>", status_code=400)
+    
+    if state not in pending_states:
+        # If state not found, it might be due to server restart - show helpful error
+        html = f"""<!DOCTYPE html>
+<html><head><title>Session Expired</title></head>
+<body style="font-family: sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto;">
+<h2>Session Expired</h2>
+<p>Your sign-in session expired. This can happen if the server restarted during sign-in.</p>
+<p><a href="{BASE_URL}">Click here to try again</a></p>
+<p style="color: #666; font-size: 0.9rem;">Technical details: State parameter not found. Active states: {len(pending_states)}</p>
+</body></html>"""
+        return HTMLResponse(html, status_code=400)
 
     state_data = pending_states.pop(state)
+    logger.info(f"Found state data for client redirect: {state_data.get('client_redirect_uri', 'none')}")
 
     # Exchange Google code for Google access token
     try:
