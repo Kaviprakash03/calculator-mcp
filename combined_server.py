@@ -261,6 +261,11 @@ async def oauth_callback(request: Request):
 
     # ── MCP client initiated the flow ──
     if client_redirect:
+        # Generate MCP token directly for VS Code
+        mcp_token = secrets.token_urlsafe(32)
+        mcp_tokens[mcp_token] = session_id
+        
+        # Create auth code for OAuth flow
         auth_code = secrets.token_urlsafe(32)
         auth_codes[auth_code] = {"session_id": session_id, "created_at": time.time()}
 
@@ -269,7 +274,7 @@ async def oauth_callback(request: Request):
         if client_state:
             redirect_url += f"&state={client_state}"
 
-        logger.info(f"Redirecting {user_email} back to MCP client")
+        logger.info(f"Redirecting {user_email} back to MCP client with auth code")
         return RedirectResponse(redirect_url)
 
     # ── Direct browser visit ──
