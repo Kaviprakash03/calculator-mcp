@@ -408,31 +408,58 @@ async def oauth_token(request: Request):
 
 
 # ─────────────────────────────────────────────
-# SSE (MCP transport)
+# SSE (MCP transport) - Middleware for auth
 # ─────────────────────────────────────────────
-async def handle_sse(request: Request):
-    """Validate bearer token then start MCP session."""
-    auth_header = request.headers.get("Authorization", "")
-    token = auth_header[7:] if auth_header.startswith("Bearer ") else None
+class AuthMiddleware:
+    """Middleware to validate bearer tokens before MCP requests."""
+    def __init__(self, app):
+        self.app = app
 
-    if not token:
-        token = request.query_params.get("token")
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            # Extract headers
+            headers = dict(scope.get("headers", []))
+            auth_header = headers.get(b"authorization", b"").decode()
+            
+            token = None
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+            
+            # Check query params if no header token
+            if not token:
+                query_string = scope.get("query_string", b"").decode()
+                if "token=" in query_string:
+                    for param in query_string.split("&"):
+                        if param.startswith("token="):
+                            token = param.split("=", 1)[1]
+                            break
+            
+            # Validate token
+            if not token or token not in mcp_tokens:
+                response = Response(
+                    f"Unauthorized. Please sign in at {BASE_URL}",
+                    status_code=401,
+                    media_type="text/plain",
+                )
+                await response(scope, receive, send)
+                return
+            
+            session = sessions.get(mcp_tokens[token])
+            if not session:
+                response = Response(
+                    "Session expired. Please sign in again.", 
+                    status_code=401
+                )
+                await response(scope, receive, send)
+                return
+            
+            logger.info(f"MCP session started for {session['email']}")
+        
+        # Pass through to MCP app
+        await self.app(scope, receive, send)
 
-    if not token or token not in mcp_tokens:
-        return Response(
-            f"Unauthorized. Please sign in at {BASE_URL}",
-            status_code=401,
-            media_type="text/plain",
-        )
-
-    session = sessions.get(mcp_tokens[token])
-    if not session:
-        return Response("Session expired. Please sign in again.", status_code=401)
-
-    logger.info(f"MCP session started for {session['email']}")
-
-    # Use FastMCP's built-in SSE app
-    return await mcp.sse_app(request)
+# Wrap MCP's SSE app with auth middleware
+mcp_sse_with_auth = AuthMiddleware(mcp.sse_app)
 
 
 # ─────────────────────────────────────────────
@@ -522,10 +549,13 @@ app = Starlette(
         Route("/oauth/token",                            oauth_token,    methods=["POST"]),
         Route("/oauth/register",                         oauth_register, methods=["POST"]),
         Route("/.well-known/oauth-authorization-server", oauth_metadata),
-        Route("/sse",                                    handle_sse,     methods=["GET", "POST"]),
         Route("/health",                                 health),
     ]
 )
+
+# Mount MCP SSE app with auth middleware at /sse
+from starlette.routing import Mount
+app.routes.append(Mount("/sse", app=mcp_sse_with_auth))
 
 
 if __name__ == "__main__":
