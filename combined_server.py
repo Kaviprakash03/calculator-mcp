@@ -459,7 +459,7 @@ class AuthMiddleware:
         await self.app(scope, receive, send)
 
 # Wrap MCP's SSE app with auth middleware
-mcp_sse_with_auth = AuthMiddleware(mcp.sse_app)
+mcp_sse_with_auth = AuthMiddleware(mcp.sse_app())
 
 
 # ─────────────────────────────────────────────
