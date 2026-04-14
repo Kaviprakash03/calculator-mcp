@@ -426,8 +426,8 @@ async def handle_sse(request: Request):
 
     logger.info(f"MCP session started for {session['email']}")
 
-    async with mcp.sse_server() as (read_stream, write_stream):
-        return await SseServerTransport.handle(read_stream, write_stream, request)
+    async with mcp.sse_server() as streams:
+        return await SseServerTransport("/sse").handle(streams[0], streams[1], request)
 
 
 # ─────────────────────────────────────────────
@@ -517,7 +517,7 @@ app = Starlette(
         Route("/oauth/token",                            oauth_token,    methods=["POST"]),
         Route("/oauth/register",                         oauth_register, methods=["POST"]),
         Route("/.well-known/oauth-authorization-server", oauth_metadata),
-        Route("/sse",                                    handle_sse),
+        Route("/sse",                                    handle_sse,     methods=["GET", "POST"]),
         Route("/health",                                 health),
     ]
 )
@@ -525,5 +525,6 @@ app = Starlette(
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
     logger.info(f"Starting Calculator MCP - {BASE_URL}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host=host, port=port)
