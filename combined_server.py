@@ -427,7 +427,8 @@ async def handle_sse(request: Request):
     logger.info(f"MCP session started for {session['email']}")
 
     async with mcp.sse_server() as streams:
-        return await SseServerTransport("/sse").handle(streams[0], streams[1], request)
+        sse = SseServerTransport("/sse")
+        return await sse(request, streams[0], streams[1])
 
 
 # ─────────────────────────────────────────────
